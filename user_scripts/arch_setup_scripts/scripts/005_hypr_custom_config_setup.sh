@@ -316,7 +316,7 @@ EOF
 # which can be found in dusky control center
 # ==============================================================================
 # USER CONFIGURATION: workspace_rules.conf
-# Managed by Dusky TUI - Granular Matrix v4.3.0
+# Managed by Dusky TUI - Granular Matrix v4.4.1
 # ==============================================================================
 
 # --- Global Rules ---
@@ -326,13 +326,6 @@ workspace = r[11-99], layout:$global_layout
 # --- Ephemeral Global Override (Resets on reboot) ---
 $ephemeral_layout = monocle
 $ephemeral_enabled = false
-
-# --- Smart Gaps (Applied to workspaces with only 1 window) ---
-$smart_gaps_in = 0
-$smart_gaps_out = 0
-$smart_border = 0
-workspace = w[tv1], gapsin:$smart_gaps_in, gapsout:$smart_gaps_out, bordersize:$smart_border
-workspace = f[1], gapsin:$smart_gaps_in, gapsout:$smart_gaps_out, bordersize:$smart_border
 
 # --- Individual Workspaces (1-10) ---
 $ws1_layout = dwindle

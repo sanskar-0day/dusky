@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
-# Dusky TUI Engine - Master v4.4.0 (Ultimate Hyprland 0.54 Edition)
+# Dusky TUI Engine - Master v4.4.1 (Ultimate Hyprland 0.54 Edition)
 # -----------------------------------------------------------------------------
 # Target: Arch Linux / Hyprland / UWSM / Wayland
 #
 # ARCHITECTURE:
 #   Variable-Proxy Engine. Fully implements per-workspace submenu granularity
-#   (WS 1-10), Global Fallbacks, Ephemeral Memory Overrides, Smart Gaps,
-#   and comprehensive layout options (Master Orient + Scrolling Direction).
+#   (WS 1-10), Global Fallbacks, Ephemeral Memory Overrides, and comprehensive 
+#   layout options (Master Orient + Scrolling Direction).
+#   NOTE: Visual Geometry (Gaps/Borders) strictly deferred to appearance.conf.
 # -----------------------------------------------------------------------------
 
 set -euo pipefail
@@ -22,7 +23,7 @@ declare -r EDIT_DIR="${HYPR_DIR}/edit_here/source"
 declare -r CONFIG_FILE="${EDIT_DIR}/workspace_rules.conf"
 
 declare -r APP_TITLE="Dusky Workspace Manager"
-declare -r APP_VERSION="v4.4.0 (Production)"
+declare -r APP_VERSION="v4.4.1 (Production)"
 
 # Dimensions & Layout
 declare -ri MAX_DISPLAY_ROWS=14
@@ -34,7 +35,7 @@ declare -ri HEADER_ROWS=4
 declare -ri TAB_ROW=3
 declare -ri ITEM_START_ROW=$(( HEADER_ROWS + 1 ))
 
-declare -ra TABS=("Global" "Workspaces" "Smart Gaps")
+declare -ra TABS=("Global" "Workspaces")
 
 # Item Registration
 register_items() {
@@ -53,15 +54,7 @@ register_items() {
         register_child "ws_${i}" "Persistent"    "\$ws${i}_persistent|bool||||" "false"
         register_child "ws_${i}" "Master Orient" "\$ws${i}_master_orient|cycle||left,right,top,bottom,center||" "left"
         register_child "ws_${i}" "Scroll Dir"    "\$ws${i}_scroll_dir|cycle||right,left,up,down||" "right"
-#        register_child "ws_${i}" "Border Size"   "\$ws${i}_bordersize|int||0|10|1" "2"
-#        register_child "ws_${i}" "Gaps In"       "\$ws${i}_gapsin|int||0|40|2" "6"
-#        register_child "ws_${i}" "Gaps Out"      "\$ws${i}_gapsout|int||0|40|2" "12"
     done
-
-    # Tab 2: Smart Gaps & Visuals (Applied when only 1 window is tiled)
-    register 2 "1-Win Gaps In"   '$smart_gaps_in|int||0|40|2' "0"
-    register 2 "1-Win Gaps Out"  '$smart_gaps_out|int||0|40|2' "0"
-    register 2 "1-Win Border"    '$smart_border|int||0|10|1' "0"
 }
 
 # --- CHANGE 1 of 4: post_write_action sets flag instead of blocking ---
@@ -171,7 +164,7 @@ ensure_config_exists() {
         {
             printf '# ==============================================================================\n'
             printf '# USER CONFIGURATION: workspace_rules.conf\n'
-            printf '# Managed by Dusky TUI - Granular Matrix v4.3.0\n'
+            printf '# Managed by Dusky TUI - Granular Matrix v4.4.1\n'
             printf '# ==============================================================================\n\n'
             
             printf '# --- Global Rules ---\n'
@@ -181,13 +174,6 @@ ensure_config_exists() {
             printf '# --- Ephemeral Global Override (Resets on reboot) ---\n'
             printf '$ephemeral_layout = monocle\n'
             printf '$ephemeral_enabled = false\n\n'
-
-            printf '# --- Smart Gaps (Applied to workspaces with only 1 window) ---\n'
-            printf '$smart_gaps_in = 0\n'
-            printf '$smart_gaps_out = 0\n'
-            printf '$smart_border = 0\n'
-            printf 'workspace = w[tv1], gapsin:$smart_gaps_in, gapsout:$smart_gaps_out, bordersize:$smart_border\n'
-            printf 'workspace = f[1], gapsin:$smart_gaps_in, gapsout:$smart_gaps_out, bordersize:$smart_border\n\n'
 
             printf '# --- Individual Workspaces (1-10) ---\n'
             local i
