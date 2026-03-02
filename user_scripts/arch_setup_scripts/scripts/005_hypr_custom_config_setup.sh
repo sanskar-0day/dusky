@@ -268,6 +268,13 @@ binds {
 # debug {
 #    overlay = true
 # }
+# -------------------------------------------------------------------------------------------------
+# 7. SMART GAPS (Single Window Override)
+# Applied automatically when only 1 window is tiled or fullscreened on a workspace.
+# -------------------------------------------------------------------------------------------------
+$single_window_gap = 10
+workspace = w[tv1], gapsout:$single_window_gap, gapsin:0
+workspace = f[1], gapsout:$single_window_gap, gapsin:0
 EOF
             ;;
         "autostart.conf")
