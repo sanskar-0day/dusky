@@ -84,7 +84,9 @@ declare -g DEFAULT_PRIMARY_REASON=''
 TEMP_OUTPUT=''
 
 cleanup() {
-    [[ -n ${TEMP_OUTPUT:-} ]] && rm -f -- "$TEMP_OUTPUT"
+    if [[ -n ${TEMP_OUTPUT:-} ]]; then
+        rm -f -- "$TEMP_OUTPUT"
+    fi
 }
 trap cleanup EXIT
 
