@@ -176,6 +176,7 @@ declare -A CUSTOM_SCRIPT_PATHS=(
     ["dusky_commands_after.sh"]="user_scripts/misc_extra/dusky_commands_after.sh"
     ["rofi_wallpaper_selctor.sh"]="user_scripts/rofi/rofi_wallpaper_selctor.sh"
     ["dusky_matugen_tui.sh"]="user_scripts/theme_matugen/dusky_matugen_tui.sh"
+    ["dusky_firefox_tui.sh"]="user_scripts/theme_matugen/dusky_firefox_tui.sh"
 )
 
 # ------------------------------------------------------------------------------
@@ -311,6 +312,7 @@ declare -ra UPDATE_SEQUENCE=(
     "U | append_gaps_line_in_appearance.sh"
     "U | dusky_commands_after.sh"
     "U | ignore-fail | dusky_matugen_tui.sh --smart"
+    "U | ignore-fail | dusky_firefox_tui.sh --sync --all"
 )
 
 # ==============================================================================

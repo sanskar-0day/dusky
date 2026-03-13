@@ -20,6 +20,7 @@ SCRIPT_SEARCH_DIRS=(
     "${HOME}/user_scripts/arch_setup_scripts/scripts"
     "${HOME}/user_scripts/arch_setup_scripts"
     "${HOME}/user_scripts/rofi"
+    "${HOME}/user_scripts/theme_matugen/dusky_firefox_tui.sh"
     # "${HOME}/my_other_scripts"
     # "/opt/shared_team_scripts"
 )
@@ -82,6 +83,9 @@ INSTALL_SEQUENCE=(
     "U | 230_non_asus_laptop.sh --auto"
     "U | 235_file_manager_switch.sh --nemo"
     "U | 236_browser_switcher.sh --firefox"
+
+    "U | dusky_firefox_tui.sh --sync --all"
+
     "U | 237_text_editer_switcher.sh --gnome-text-editor"
     "U | 238_terminal_switcher.sh --kitty"
     "U | 240_swaync_dgpu_fix.sh --disable"
