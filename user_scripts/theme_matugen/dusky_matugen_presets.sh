@@ -10,6 +10,7 @@
 #   - SYNC: Perfectly mirrors state.conf schema with theme_ctl.sh.
 #   - OPTIM: UI Status Bar reformatted to fit 80-char width constraint.
 #   - FIX: apply_matugen uses Bash arrays to conditionally build commands.
+#   - ARCH: Now executes through theme_ctl.sh for flawless state syncing.
 # -----------------------------------------------------------------------------
 
 set -euo pipefail
@@ -30,6 +31,7 @@ declare -r USE_STATE_FILE=true
 declare -r STATE_DIR="${HOME}/.config/dusky/settings/dusky_theme"
 declare -r STATE_FILE="${STATE_DIR}/state.conf"
 declare -r FAVORITES_FILE="${STATE_DIR}/theme_preset_fav"
+declare -r THEME_CTL="${HOME}/user_scripts/theme_matugen/theme_ctl.sh"
 
 # Dimensions & Layout
 declare -ri MAX_DISPLAY_ROWS=16
@@ -532,13 +534,24 @@ save_state() {
         return 1
     }
 
-    printf '# Dusky Theme State File\nTHEME_MODE=%s\nMATUGEN_TYPE=%s\nMATUGEN_CONTRAST=%s\nSOURCE_COLOR_INDEX=%s\nBASE16_BACKEND=%s\nLAST_APPLIED_HEX=%s\n' \
-        "${SETTINGS["mode"]}" \
-        "${SETTINGS["type"]}" \
-        "${contrast_val}" \
-        "${SETTINGS["index"]}" \
-        "${SETTINGS["base16"]}" \
-        "${LAST_APPLIED_HEX}" > "${tmpfile}"
+    # Only save the UI's last applied hex here. The rest of the state is managed by theme_ctl.sh
+    # We read state from theme_ctl.sh, but only write the LAST_APPLIED_HEX to avoid race conditions.
+    
+    # Read the current true state to preserve it
+    local current_state=""
+    if [[ -f "${STATE_FILE}" ]]; then
+        # Use grep to remove the old LAST_APPLIED_HEX line if it exists
+        current_state=$(grep -v "^LAST_APPLIED_HEX=" "${STATE_FILE}" || true)
+    fi
+    
+    # Write the preserved state plus the updated hex
+    if [[ -n "${current_state}" ]]; then
+        printf '%s\n' "${current_state}" > "${tmpfile}"
+    else
+        printf '# Dusky Theme State File\n' > "${tmpfile}"
+    fi
+    
+    printf 'LAST_APPLIED_HEX=%s\n' "${LAST_APPLIED_HEX}" >> "${tmpfile}"
 
     cat "$tmpfile" > "$STATE_FILE"
     rm -f "$tmpfile"
@@ -550,26 +563,25 @@ save_state() {
 
 apply_matugen() {
     local hex="${1^^}"
-    local type="${SETTINGS["type"]}"
-    local mode="${SETTINGS["mode"]}"
-    local contrast="${SETTINGS["contrast"]}"
-    local base16="${SETTINGS["base16"]}"
     
+    # Update the local UI tracking variable
     LAST_APPLIED_HEX="${hex}"
     save_state
 
-    # Construct the array dynamically to prevent empty string errors.
-    # Note: --source-color-index is intentionally omitted here as it only 
-    # applies to 'matugen image', not 'matugen color hex'.
-    local -a cmd=(matugen)
-    [[ "$base16" != "disable" ]] && cmd+=(--base16-backend "$base16")
-    cmd+=(color hex "$hex" --type "$type" --mode "$mode")
-    [[ "$contrast" != "disable" && "$contrast" != "0.0" ]] && cmd+=(--contrast "$contrast")
+    # Execute synchronously. No setsid!
+    local -a cmd=("${THEME_CTL}" "set" "--no-wall" "--no-regen" "--mode" "${SETTINGS["mode"]}" "--type" "${SETTINGS["type"]}" "--contrast" "${SETTINGS["contrast"]}" "--index" "${SETTINGS["index"]}" "--base16" "${SETTINGS["base16"]}")
 
+    # Fire the controller set command to update the environment
     if "${cmd[@]}" >/dev/null 2>&1; then
-        LAST_STATUS_MSG="${C_GREEN}✓ Applied: ${hex} (${type}, ${mode}, Cont: ${contrast}, B16: ${base16})${C_RESET}"
+        # Now safely run the solid hex color generation
+        local -a color_cmd=("${THEME_CTL}" "color" "${hex}")
+        if "${color_cmd[@]}" >/dev/null 2>&1; then
+            LAST_STATUS_MSG="${C_GREEN}✓ Applied via theme_ctl: ${hex}${C_RESET}"
+        else
+            LAST_STATUS_MSG="${C_RED}✗ theme_ctl failed to generate color: ${hex}${C_RESET}"
+        fi
     else
-        LAST_STATUS_MSG="${C_RED}✗ Failed to apply: ${hex}${C_RESET}"
+        LAST_STATUS_MSG="${C_RED}✗ theme_ctl failed to update state for: ${hex}${C_RESET}"
     fi
 }
 
@@ -655,7 +667,10 @@ modify_setting() {
     esac
 
     SETTINGS["${key}"]="${new_val}"
-    save_state
+    
+    # We intentionally do NOT call save_state() here.
+    # The settings changes are visual-only until the user presses [Enter] to apply a color,
+    # at which point apply_matugen() invokes theme_ctl.sh to solidify the settings globally.
 }
 
 trigger_action() {
