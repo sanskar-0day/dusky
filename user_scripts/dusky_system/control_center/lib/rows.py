@@ -550,7 +550,7 @@ def _run_shell_async(
 
         try:
             success, stdout_data, _ = proc.communicate_utf8_finish(result)
-            if success and proc.get_successful() and stdout_data:
+            if success and proc.get_successful() and stdout_data is not None:
                 on_complete(stdout_data.strip())
             else:
                 on_complete(None)
@@ -562,6 +562,31 @@ def _run_shell_async(
 
     proc.communicate_utf8_async(None, cancellable, on_communicate_finish)
     return handle
+
+
+def _spawn_command_async(command: str) -> bool:
+    """
+    Spawn *command* without capturing output and asynchronously reap it.
+    """
+    argv = _parse_simple_argv(command)
+    if argv is None:
+        argv = ["/bin/sh", "-c", command]
+
+    try:
+        launcher = Gio.SubprocessLauncher.new(
+            Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE
+        )
+        proc = launcher.spawnv(argv)
+    except GLib.Error as e:
+        log.debug("Failed to spawn command '%.30s...': %s", command, e.message)
+        return False
+
+    def on_wait_finish(proc: Gio.Subprocess, result: Gio.AsyncResult) -> None:
+        with suppress(GLib.Error):
+            proc.wait_check_finish(result)
+
+    proc.wait_check_async(None, on_wait_finish)
+    return True
 
 
 # =============================================================================
@@ -751,9 +776,6 @@ class StateMonitorMixin(AsyncPollingMixin):
         with self._state.lock:
             if self._state.is_destroyed:
                 return
-
-        if isinstance(self, Gtk.Widget) and not self.get_mapped():
-            return
 
         if event_type in (Gio.FileMonitorEvent.CHANGES_DONE_HINT, Gio.FileMonitorEvent.CREATED):
             key = str(self.properties.get("key", "")).strip()
@@ -1229,45 +1251,56 @@ class SliderRow(SliderMonitorMixin, BaseActionRow):
     def _format_action_value(value: float) -> str:
         return str(int(value)) if value.is_integer() else f"{value:.15g}"
 
+    def _snap_value(self, value: float) -> float:
+        clamped = max(self.min_val, min(value, self.max_val))
+        steps = round((clamped - self.min_val) / self.step_val)
+        snapped = self.min_val + (steps * self.step_val)
+        return max(self.min_val, min(snapped, self.max_val))
+
     def _apply_value_update(self, new_value: float) -> bool:
         """Push a polled value into the slider, suppressing feedback."""
         with self._state.lock:
             if self._state.is_destroyed:
                 return GLib.SOURCE_REMOVE
 
-        safe_val = max(self.min_val, min(new_value, self.max_val))
+        safe_val = self._snap_value(new_value)
         current = self.slider.get_value()
         if math.isclose(current, safe_val, abs_tol=MIN_STEP_VALUE):
+            self._last_snapped = safe_val
             return GLib.SOURCE_REMOVE
 
-        # Guard against the synchronous value-changed re-entry.
         self._slider_changing = True
         try:
             self.slider.set_value(safe_val)
-            self._last_snapped = round(safe_val / self.step_val) * self.step_val
+            self._last_snapped = safe_val
         finally:
             self._slider_changing = False
 
         return GLib.SOURCE_REMOVE
 
     def _on_value_changed(self, scale: Gtk.Scale) -> None:
-        # Re-entrant call from set_value() inside this class — ignore.
         if self._slider_changing:
             return
 
         val = scale.get_value()
-        snapped = round(val / self.step_val) * self.step_val
-        snapped = max(self.min_val, min(snapped, self.max_val))
+        snapped = self._snap_value(val)
 
-        if (
-            self._last_snapped is not None
-            and abs(snapped - self._last_snapped) < MIN_STEP_VALUE
+        if self._last_snapped is not None and math.isclose(
+            snapped,
+            self._last_snapped,
+            abs_tol=MIN_STEP_VALUE,
         ):
+            if not math.isclose(val, snapped, abs_tol=MIN_STEP_VALUE):
+                self._slider_changing = True
+                try:
+                    self.slider.set_value(snapped)
+                finally:
+                    self._slider_changing = False
             return
+
         self._last_snapped = snapped
 
-        # Snap the visual handle if it drifted from the grid.
-        if abs(snapped - val) > MIN_STEP_VALUE:
+        if not math.isclose(snapped, val, abs_tol=MIN_STEP_VALUE):
             self._slider_changing = True
             try:
                 self.slider.set_value(snapped)
@@ -1309,12 +1342,7 @@ class SliderRow(SliderMonitorMixin, BaseActionRow):
                 if is_term:
                     utility.execute_command(final_cmd, "Slider", True)
                 else:
-                    subprocess.Popen(
-                        final_cmd,
-                        shell=True,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
+                    _spawn_command_async(final_cmd)
         return GLib.SOURCE_REMOVE
 
 
@@ -1500,8 +1528,7 @@ class SelectionRow(DynamicIconMixin, Adw.ComboRow):
             )
             if res.returncode == 0:
                 lines = [line.strip() for line in res.stdout.splitlines() if line.strip()]
-                if lines:
-                    GLib.idle_add(self._update_options_ui, lines, generation)
+                GLib.idle_add(self._update_options_ui, lines, generation)
         except Exception as e:
             log.error("Options fetch failed: %s", e)
         finally:
@@ -1688,7 +1715,8 @@ class EntryRow(DynamicIconMixin, Adw.EntryRow):
         if not text:
             return
         if isinstance(self.on_action, dict) and (cmd := self.on_action.get("command")):
-            final_cmd = str(cmd).replace("{value}", text)
+            safe_value = shlex.quote(text)
+            final_cmd = str(cmd).replace("{value}", safe_value)
             utility.execute_command(
                 final_cmd,
                 "Entry",
