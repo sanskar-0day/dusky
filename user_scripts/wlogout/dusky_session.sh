@@ -29,7 +29,8 @@ fi
 hyprctl dispatch workspace 1 >/dev/null 2>&1 || :
 
 # 3. Smart teardown logic
-if [[ -n "${UWSM_ENV_FILE:-}" ]] || systemctl --user is-active --quiet "wayland-wm@*.service" 2>/dev/null; then
+# Safely check if UWSM is installed, then ask UWSM if it is actively managing the session
+if command -v uwsm >/dev/null 2>&1 && uwsm check is-active >/dev/null 2>&1; then
 
     # --- UWSM MANAGED TEARDOWN ---
     # UWSM handles graceful application termination natively via systemd targets.
@@ -65,6 +66,7 @@ else
 
     batch_cmds=""
 
+    # Safely capture JSON, avoiding process substitution error masking
     if clients_json=$(hyprctl clients -j 2>/dev/null); then
         if client_rows=$(jq -r '.[] | "\(.pid)\t\(.address)"' <<<"$clients_json" 2>/dev/null); then
             if [[ -n "$client_rows" ]]; then
@@ -76,6 +78,7 @@ else
         fi
     fi
 
+    # Best-effort window closure; script must proceed if IPC fails
     if [[ -n "$batch_cmds" ]]; then
         hyprctl --batch "$batch_cmds" >/dev/null 2>&1 || :
         sleep 1
