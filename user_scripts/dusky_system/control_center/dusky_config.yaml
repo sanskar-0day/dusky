@@ -231,6 +231,71 @@ pages:
         type: exec
         command: kitty --class ORCHESTRA.sh --hold sh -c $HOME/user_scripts/arch_setup_scripts/ORCHESTRA.sh
         terminal: false
+
+
+  - type: section
+    properties:
+      title: System Recovery
+      icon: ''
+      description: ''
+    items:
+    - type: navigation
+      properties:
+        title: Btrfs Snapshot Rollback
+        description: Revert system or data to previous states
+        icon: document-revert-symbolic
+      layout:
+        - type: section
+          properties:
+            title: Full System Recovery
+            description: Safest option. Reverts Root and Home simultaneously to keep configs and data synced.
+          items:
+            - type: async_selector
+              properties:
+                title: "Combined Recovery (Root + Home)"
+                description: "Select an exact timestamp. Requires immediate reboot."
+                icon: system-reboot-symbolic
+                list_command: "pkexec ~/user_scripts/btrfs_snapshots/cc/04_dusky_snapshot_manager.py -c root -l --json"
+                display_template: "[{date}] {description}"
+                button_text: "Restore Both"
+                style: "destructive"
+                sort: "reverse"
+              on_action:
+                type: "exec"
+                command: "pkexec ~/user_scripts/btrfs_snapshots/cc/bash_wrapper_for_cc.sh '{date}'"
+
+        - type: section
+          properties:
+            title: Advanced Recovery (Partial)
+            description: Revert specific subvolumes individually.
+          items:
+            - type: async_selector
+              properties:
+                title: "System Recovery (Root Only)"
+                description: "Revert pacman updates or system configs. Requires reboot."
+                icon: drive-harddisk-system-symbolic
+                list_command: "pkexec ~/user_scripts/btrfs_snapshots/cc/04_dusky_snapshot_manager.py -c root -l --json"
+                display_template: "[{id}] {date} | {description}"
+                button_text: "Restore Root"
+                style: "destructive"
+                sort: "reverse"
+              on_action:
+                type: "exec"
+                command: "pkexec ~/user_scripts/btrfs_snapshots/cc/04_dusky_snapshot_manager.py -c root -R {id}"
+            - type: async_selector
+              properties:
+                title: "Data Recovery (Home Only)"
+                description: "Revert personal files. Hot-reloads instantly (no reboot)."
+                icon: user-home-symbolic
+                list_command: "pkexec ~/user_scripts/btrfs_snapshots/cc/04_dusky_snapshot_manager.py -c home -l --json"
+                display_template: "[{id}] {date} | {description}"
+                button_text: "Restore Home"
+                style: "suggested"
+                sort: "reverse"
+              on_action:
+                type: "exec"
+                command: "pkexec ~/user_scripts/btrfs_snapshots/cc/04_dusky_snapshot_manager.py -c home -R {id}"
+
   - type: section
     properties:
       title: Dusky Updates

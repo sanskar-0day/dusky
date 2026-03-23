@@ -18,6 +18,7 @@ import math
 import shlex
 import subprocess
 import threading
+import json
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
@@ -867,11 +868,13 @@ class BaseActionRow(DynamicIconMixin, Adw.ActionRow):
                 if p.exists():
                     img = Gtk.Image.new_from_file(str(p))
                     img.add_css_class("action-row-prefix-icon")
+                    img.set_valign(Gtk.Align.CENTER)
                     return img
 
         icon_name = _resolve_static_icon_name(icon)
         img = Gtk.Image.new_from_icon_name(icon_name)
         img.add_css_class("action-row-prefix-icon")
+        img.set_valign(Gtk.Align.CENTER)
         return img
 
     def do_unroot(self) -> None:
@@ -1847,6 +1850,174 @@ class ExpanderRow(DynamicIconMixin, Adw.ExpanderRow):
         sources = self._state.mark_destroyed_and_get_sources()
         _batch_source_remove(*sources)
 
+
+
+class AsyncSelectorRow(BaseActionRow):
+    """
+    A generalized widget that fetches a JSON array of dictionaries,
+    populates a dropdown using a display template, and executes a command
+    by injecting values from the selected dictionary.
+    """
+    __gtype_name__ = "DuskyAsyncSelectorRow"
+
+    def __init__(
+        self,
+        properties: RowProperties,
+        on_action: ActionConfig | None = None,
+        context: RowContext | None = None,
+    ) -> None:
+        super().__init__(properties, on_action, context)
+
+        self.list_command = str(properties.get("list_command", ""))
+        self.display_template = str(properties.get("display_template", "{id}"))
+        self.sort_order = str(properties.get("sort", "none")).lower()
+
+        button_text = str(properties.get("button_text", "Execute"))
+        button_style = str(properties.get("style", "default")).lower()
+
+        self.json_data: list[dict] = []
+
+        # UI Construction
+        self.controls_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.controls_box.set_valign(Gtk.Align.CENTER)
+
+        self.refresh_btn = Gtk.Button(icon_name="view-refresh-symbolic")
+        self.refresh_btn.set_tooltip_text("Load Data")
+        self.refresh_btn.connect("clicked", self._on_refresh_clicked)
+        self.refresh_btn.add_css_class("flat")
+
+        self.model = Gtk.StringList.new([])
+        self.dropdown = Gtk.DropDown(model=self.model)
+        self.dropdown.set_valign(Gtk.Align.CENTER)
+        self.dropdown.set_halign(Gtk.Align.END)
+        self.dropdown.set_hexpand(False)
+
+        self.action_btn = Gtk.Button(label=button_text)
+        self.action_btn.connect("clicked", self._on_action_clicked)
+        self.action_btn.set_sensitive(False)
+
+        # Apply standard style mapping
+        if button_style == "destructive":
+            self.action_btn.add_css_class("destructive-action")
+        elif button_style == "suggested":
+            self.action_btn.add_css_class("suggested-action")
+        else:
+            self.action_btn.add_css_class("default-action")
+
+        self.controls_box.append(self.refresh_btn)
+        self.controls_box.append(self.dropdown)
+        self.controls_box.append(self.action_btn)
+
+        self.add_suffix(self.controls_box)
+
+    def _on_refresh_clicked(self, _btn: Gtk.Button) -> None:
+        if not self.list_command:
+            return
+        self.refresh_btn.set_sensitive(False)
+        self.action_btn.set_sensitive(False)
+        _submit_task_safe(self._fetch_data_async, self._state)
+
+    def _fetch_data_async(self) -> None:
+        try:
+            argv = (
+                shlex.split(self.list_command)
+                if not _SHELL_METACHAR.intersection(self.list_command)
+                else ["/bin/sh", "-c", self.list_command]
+            )
+            res = subprocess.run(argv, capture_output=True, text=True, check=True)
+
+            output = res.stdout.strip()
+            parsed_data = json.loads(output)
+
+            if not isinstance(parsed_data, list):
+                raise ValueError("Expected a JSON array.")
+            if not all(isinstance(item, dict) for item in parsed_data):
+                raise ValueError("Expected every JSON array item to be a dictionary object.")
+
+            GLib.idle_add(self._update_ui, parsed_data)
+        except Exception as e:
+            log.error("AsyncSelector fetch failed: %s", e)
+            GLib.idle_add(self._on_fetch_failed)
+
+    def _update_ui(self, parsed_data: list[dict]) -> bool:
+        with self._state.lock:
+            if self._state.is_destroyed:
+                return GLib.SOURCE_REMOVE
+
+        if self.sort_order == "reverse":
+            self.json_data = list(reversed(parsed_data))
+        else:
+            self.json_data = list(parsed_data)
+
+        self.model.splice(0, self.model.get_n_items(), [])
+        strings: list[str] = []
+
+        class SafeDict(dict):
+            """Prevents KeyError if the template requests a missing JSON key"""
+            def __missing__(self, key):
+                return f"{{{key}}}"
+
+        for item in self.json_data:
+            try:
+                label = self.display_template.format_map(SafeDict(item))
+                strings.append(label)
+            except Exception:
+                strings.append("Format Error")
+
+        self.model.splice(0, 0, strings)
+
+        has_valid_action = isinstance(self.on_action, dict) and (
+            (self.on_action.get("type") == "exec" and bool(self.on_action.get("command")))
+            or (self.on_action.get("type") == "redirect" and bool(self.on_action.get("page")))
+        )
+
+        self.refresh_btn.set_sensitive(True)
+        self.action_btn.set_sensitive(bool(strings) and has_valid_action)
+        return GLib.SOURCE_REMOVE
+
+    def _on_fetch_failed(self) -> bool:
+        with self._state.lock:
+            if self._state.is_destroyed:
+                return GLib.SOURCE_REMOVE
+
+        self.json_data.clear()
+        self.model.splice(0, self.model.get_n_items(), [])
+        self.refresh_btn.set_sensitive(True)
+        self.action_btn.set_sensitive(False)
+
+        if self.toast_overlay:
+            utility.toast(self.toast_overlay, "✖ Failed to fetch data (Check logs or Polkit)", 4)
+
+        return GLib.SOURCE_REMOVE
+
+    def _on_action_clicked(self, _btn: Gtk.Button) -> None:
+        selected_idx = self.dropdown.get_selected()
+        if selected_idx == Gtk.INVALID_LIST_POSITION or selected_idx >= len(self.json_data):
+            return
+
+        selected_dict = self.json_data[selected_idx]
+
+        if not isinstance(self.on_action, dict):
+            return
+
+        if self.on_action.get("type") == "exec" and (cmd_template := self.on_action.get("command")):
+            class SafeDict(dict):
+                def __missing__(self, key):
+                    return f"{{{key}}}"
+
+            # Inject the JSON values into the execution command
+            final_cmd = cmd_template.format_map(SafeDict(selected_dict))
+
+            title = str(self.properties.get("title", "Action"))
+            is_term = bool(self.on_action.get("terminal", False))
+
+            success = utility.execute_command(final_cmd, title, is_term)
+            msg = f"{'▶ Executed' if success else '✖ Failed'}: {title}"
+            utility.toast(self.toast_overlay, msg, 2 if success else 4)
+
+        elif self.on_action.get("type") == "redirect":
+            if pid := self.on_action.get("page"):
+                _perform_redirect(str(pid), self.config, self.sidebar)
 
 # =============================================================================
 # GRID CARDS

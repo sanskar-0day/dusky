@@ -146,7 +146,7 @@ class ItemType(StrEnum):
     GRID_CARD = "grid_card"
     EXPANDER = "expander"
     DIRECTORY_GENERATOR = "directory_generator"
-
+    ASYNC_SELECTOR = "async_selector"
 
 class SectionType(StrEnum):
     """Valid section types."""
@@ -177,7 +177,8 @@ class ItemProperties(TypedDict, total=False):
     placeholder: str
     path: str
     sort: str
-
+    list_command: str
+    display_template: str
 
 class ConfigItem(TypedDict, total=False):
     """A single item in the configuration."""
@@ -1589,6 +1590,8 @@ class DuskyControlCenter(Adw.Application):
                     row = rows.ExpanderRow(props, item.get("items"), ctx)
                 case ItemType.WARNING_BANNER:
                     row = self._build_warning_banner(props)
+                case ItemType.ASYNC_SELECTOR:
+                    row = rows.AsyncSelectorRow(props, item.get("on_action"), ctx)
                 case _:
                     log.warning("Unknown item type '%s', defaulting to button", item_type)
                     row = rows.ButtonRow(props, item.get("on_press"), ctx)
